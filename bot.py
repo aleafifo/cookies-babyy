@@ -13,7 +13,7 @@ from urllib3.exceptions import InsecureRequestWarning
 from playwright.sync_api import sync_playwright
 
 # --- إعدادات البوت والتوكن ---
-TOKEN = '8890151932:AAFj6BG0ebsClWDAh6beCZYkZLB15Zuqoik'
+TOKEN = '8890151932:AAEQApHwQ4KGsKqWzkxwyJ3HRhwB7FzI808'
 bot = telebot.TeleBot(TOKEN)
 
 # 👑 إعدادات المطور الخاصة بك (فارس)
@@ -99,6 +99,12 @@ def check_netflix_cookie_detailed(netflix_id):
             expires = account_info.get("expires")
             
             if token:
+                account_data = value_data.get("account", {})
+                membership_status = str(account_data.get("membershipStatus", "")).lower()
+                # استبعاد الحسابات المنتهية أو التي تتطلب تجديد اشتراك
+                if "cancelled" in membership_status or "expired" in membership_status or "unpaid" in membership_status:
+                    return None
+
                 plan_info = value_data.get("currentPlan", {}) or value_data.get("plan", {})
                 plan_name = str(plan_info).lower()
                 is_premium = not ("basic" in plan_name or "free" in plan_name or "ads" in plan_name)
@@ -680,7 +686,7 @@ def handle_plain_text(message):
     process_cookies_list_and_check(message.chat.id, extracted_ids, message.message_id, source_name="Combo_Text.txt")
 
 if __name__ == "__main__":
-    print("🚀 تم تشغيل البوت بنجاح وبجميع الميزات المطلوبة (الفحص، التقسيم، وشاشة TV)!")
+    print("🚀 تم تحديث دالة فحص الحسابات وتفعيل شاشات TV بنجاح تام!")
     while True:
         try: 
             bot.polling(none_stop=True, skip_pending=True)
