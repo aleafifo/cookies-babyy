@@ -210,10 +210,16 @@ def _threaded_cookies_check(chat_id, netflix_ids, reply_to_message_id, source_na
                 USED_COOKIES_HISTORY.add(netflix_id)
                 if netflix_id not in VALID_COOKIES_POOL:
                     VALID_COOKIES_POOL.append(netflix_id)
-                
-            token = result["token"]
+            
+            token = result.get("token")
             full_cookie_string = f"NetflixId={netflix_id}"
-            direct_netflix_url = f"https://netflix.com/?nftoken={token}"
+            
+            # تصحيح الروابط لضمان ظهورها وعملها بشكل دقيق
+            if token:
+                direct_netflix_url = f"https://www.netflix.com/browse?nftoken={token}"
+            else:
+                direct_netflix_url = "https://www.netflix.com/login"
+
             encoded_cookie = urllib.parse.quote(full_cookie_string)
             bridge_login_url = f"https://nftokengen-7ik6.onrender.com/nf/netflix?cookie={encoded_cookie}"
             
@@ -251,7 +257,6 @@ def _threaded_cookies_check(chat_id, netflix_ids, reply_to_message_id, source_na
                 InlineKeyboardButton("💻 PC Login", url=direct_netflix_url), 
                 InlineKeyboardButton("📱 Phone Login", url=bridge_login_url)
             )
-            # إرسال رسالة تفصيلية فوراً لكل حساب شغال
             safe_send_message(chat_id, res_text, markup)
             time.sleep(0.3)
         else:
