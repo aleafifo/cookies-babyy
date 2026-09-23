@@ -13,7 +13,7 @@ from urllib3.exceptions import InsecureRequestWarning
 from playwright.sync_api import sync_playwright
 
 # --- إعدادات البوت والتوكن ---
-TOKEN = '8890151932:AAEQApHwQ4KGsKqWzkxwyJ3HRhwB7FzI808'
+TOKEN = '8890151932:AAFj6BG0ebsClWDAh6beCZYkZLB15Zuqoik'
 bot = telebot.TeleBot(TOKEN)
 
 # 👑 إعدادات المطور الخاصة بك (فارس)
