@@ -101,10 +101,12 @@ def check_netflix_cookie_detailed(netflix_id):
             expires = account_info.get("expires")
             
             if token:
-                # 🛑 فلترة متقدمة لمنع الحسابات المنتهية أو التي تتطلب إعادة اشتراك (مثل Restart Membership)
+                # 🛑 فحص دقيق لمنع حسابات إعادة الاشتراك (مثل لقطات الشاشة التي تُظهر Restart Membership)
                 current_status = value_data.get("currentStatus", {})
                 membership_status = str(current_status.get("membershipStatus", "")).upper()
-                if "EXPIRED" in membership_status or "CANCELED" in membership_status or "UNSUBSCRIBED" in membership_status:
+                
+                # إذا كانت العضوية منتهية أو ملغاة أو غير نشطة، نرفضها فوراً
+                if "EXPIRED" in membership_status or "CANCELED" in membership_status or "UNSUBSCRIBED" in membership_status or "NONE" in membership_status:
                     return None
 
                 plan_info = value_data.get("currentPlan", {}) or value_data.get("plan", {})
@@ -514,16 +516,28 @@ def handle_user_feedback(call):
                 print(f"Error sending to second bot: {e}")
         
     elif action == "no":
-        bot.answer_callback_query(call.id, "⚠️ تم حذف الكوكيز التالف نهائياً من الذاكرة لعدم عمله.", show_alert=True)
+        bot.answer_callback_query(call.id, "⚠️ تم حذف الكوكيز التالف نهائياً من الذاكرة لعدم عمله، وجاري تعويضك بحساب جديد...", show_alert=True)
         
-        # حذف الكوكيز التالف بصمت ودون إرسال أي إشعارات عنه نهائياً
+        # حذف الكوكيز التالف بصمت
         if target_cookie and target_cookie in VALID_COOKIES_POOL:
             VALID_COOKIES_POOL.remove(target_cookie)
             
         try: 
-            bot.edit_message_text("❌ تم الإبلاغ بنجاح وحذف هذا الكوكيز التالف نهائياً من الذاكرة حتى لا يتكرر إرساله! شكراً لمساعدتك.", chat_id, call.message.message_id, reply_markup=None)
+            bot.edit_message_text("❌ تم الإبلاغ بنجاح وحذف هذا الكوكيز التالف. جاري تعويضك بحساب آخر سليم فوراً 👇", chat_id, call.message.message_id, reply_markup=None)
         except Exception: 
             pass
+            
+        # 🔄 التعويض التلقائي الفوري بحساب جديد عند الضغط على زر "لا يعمل"
+        response = execute_dispense_logic(chat_id)
+        if response["status"] == "success":
+            bot.send_message(chat_id, "🎁 **تعويض لك:**\n\n" + response["text"], reply_markup=response["markup"], parse_mode="Markdown")
+            if not hasattr(bot, 'active_dispensed_cookies'):
+                bot.active_dispensed_cookies = {}
+            bot.active_dispensed_cookies[chat_id] = response["cookie"]
+        elif response["status"] == "no_points":
+            bot.send_message(chat_id, "❌ رصيد نقاطك انتهى تماماً ولم يعد هناك رصيد كافٍ للتعويض التلقائي.")
+        else:
+            bot.send_message(chat_id, "❌ عذراً، المخزن نفد حالياً ولم نتمكن من إعطائك تعويضاً فورياً. تواصل مع المطور.")
 
 def open_admin_panel_msg(chat_id):
     markup = InlineKeyboardMarkup()
@@ -685,7 +699,7 @@ def handle_plain_text(message):
     process_cookies_list_and_check(message.chat.id, extracted_ids, message.message_id, source_name="Combo_Text.txt")
 
 if __name__ == "__main__":
-    print("🚀 تم تحديث البوت بالكامل مع الفلترة الذكية للحسابات واستبعاد المنتهية بنجاح...")
+    print("🚀 تم تحديث البوت وإضافة التعويض الفوري مع الفلترة القوية للحسابات بنجاح...")
     while True:
         try: 
             bot.polling(none_stop=True, skip_pending=True)
