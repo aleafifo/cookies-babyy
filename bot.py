@@ -12,7 +12,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from urllib3.exceptions import InsecureRequestWarning
 
 # --- إعدادات بوت الفحص الأساسي ---
-TOKEN = '8890151932:AAEfgjjTsnSf7I4WIE_Y2VptjrkbotRaVvA'
+TOKEN = '8890151932:AAH1Za_HkwR4y-AlbYNPPUhoz5vjntI70NY'
 bot = telebot.TeleBot(TOKEN)
 
 # --- إعدادات البوت الثاني المخصص لإرسال تفاصيل الكوكيز والتوكن ---
