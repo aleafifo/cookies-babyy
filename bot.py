@@ -89,9 +89,14 @@ def extract_clean_netflix_ids(text):
     return cleaned_ids
 
 # 1️⃣ الفحص العادي: يقبل كل الحسابات التي تعمل وتملك Token ولا يحذفها
+# --- دالة الفحص العادي المحدثة لضمان قبول كافة الحسابات الشغالة ---
 def check_netflix_cookie_detailed(netflix_id):
-    headers = dict(BASE_HEADERS)
-    headers["Cookie"] = f"NetflixId={netflix_id}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cookie": f"NetflixId={netflix_id}"
+    }
     try:
         response = requests.get(API_URL, params=QUERY_PARAMS, headers=headers, timeout=10, verify=False)
         if response.status_code == 200:
@@ -101,11 +106,20 @@ def check_netflix_cookie_detailed(netflix_id):
             token = account_info.get("token")
             expires = account_info.get("expires")
             
+            # إذا استرجع التوكن بنجاح أو كانت الاستجابة سليمة، يعتبر الحساب شغال فوراً
             if token:
                 return {
                     "token": token, 
                     "expires": expires, 
                     "bypass": False, 
+                    "is_premium": True
+                }
+            elif "account" in value_data or "profiles" in value_data:
+                # طريقة احتياطية لتمرير الحساب في حال عدم وجود توكن مباشر
+                return {
+                    "token": netflix_id, 
+                    "expires": None, 
+                    "bypass": True, 
                     "is_premium": True
                 }
         return None
