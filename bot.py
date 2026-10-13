@@ -96,21 +96,40 @@ def check_netflix_cookie_detailed(netflix_id):
         if response.status_code == 200:
             data = response.json()
             value_data = data.get("value", {})
-            account_info = value_data.get("account", {}).get("token", {}).get("default", {})
+            
+            # 1. فحص حالة العضوية لمنع الحسابات الملغاة أو التي تتطلب إعادة تفعيل (بكل لغات العالم)
+            membership_status = str(value_data.get("membershipStatus", "")).upper()
+            account_info_raw = value_data.get("account", {})
+            if isinstance(account_info_raw, dict):
+                acc_status = str(account_info_raw.get("membershipStatus", "")).upper()
+                if "CANCELED" in acc_status or "EXPIRED" in acc_status or "INACTIVE" in acc_status:
+                    return None
+            if "CANCELED" in membership_status or "EXPIRED" in membership_status or "INACTIVE" in membership_status:
+                return None
+
+            account_info = account_info_raw.get("token", {}).get("default", {})
             token = account_info.get("token")
             expires = account_info.get("expires")
             
             if token:
+                # 2. التأكد من وجود خطة اشتراك نشطة وليست فارغة أو أساسية/إعلانات
                 plan_info = value_data.get("currentPlan", {}) or value_data.get("plan", {})
-                plan_name = str(plan_info).lower()
+                if not plan_info or plan_info == {}:
+                    return None
                 
-                # فحص صارم: استبعاد الحسابات غير البريميوم أو العادية
+                plan_name = str(plan_info).lower()
                 is_premium = True
                 if "basic" in plan_name or "free" in plan_name or "ads" in plan_name:
                     is_premium = False
 
                 if not is_premium:
                     return None
+
+                # 3. التحقق من أن تاريخ الفواتير الصلاحية ليس في الماضي
+                if expires:
+                    exp_sec = expires // 1000 if len(str(expires)) == 13 else expires
+                    if exp_sec < time.time():
+                        return None
 
                 return {
                     "token": token, 
@@ -539,7 +558,7 @@ def handle_user_feedback(call):
 def open_admin_panel_msg(chat_id):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("📢 إرسال إذاعة جماعية (Broadcast)", callback_data="admin_broadcast"))
-    markup.add(InlineKeyboardButton("🧹 تنظيف المخزن وحذف التالف", callback_data="admin_clean_pool")) # الزر الجديد المضاف لتنظيف المخزن
+    markup.add(InlineKeyboardButton("🧹 تنظيف المخزن وحذف التالف", callback_data="admin_clean_pool"))
     markup.add(InlineKeyboardButton("🔄 تصفير الذاكرة والمكرر", callback_data="admin_clear_history"))
     
     stats_text = (
@@ -581,7 +600,6 @@ def process_broadcast_sending(message):
             
     bot.send_message(DEVELOPER_CHAT_ID, f"✅ تمت الإذاعة بنجاح! تم تسليم الرسالة إلى {sent_count} مستخدم نشط 🚀")
 
-# --- الدالة الخاصة بفحص وتنظيف المخزن وحذف الحسابات التالفة والمتوقفة ---
 @bot.callback_query_handler(func=lambda call: call.data == "admin_clean_pool")
 def clean_pool_manual_action(call):
     if call.message.chat.id != DEVELOPER_CHAT_ID:
